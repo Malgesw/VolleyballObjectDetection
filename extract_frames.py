@@ -4,8 +4,9 @@ import argparse
 import numpy as np
 
 
-def extract_frames(video_path, frames_dir, labels_dir, frames_per_video=10):
-
+def extract_frames(
+    video_path, frames_dir, labels_dir, frames_per_video=10, to_gray=False, to_neg=False
+):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error opening video: {}".format(video_path))
@@ -31,42 +32,80 @@ def extract_frames(video_path, frames_dir, labels_dir, frames_per_video=10):
         label_filename = f"{video_name}_{i:03d}.txt"
 
         img_path = os.path.join(frames_dir, frame_filename)
+        if to_gray:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if to_neg:
+                frame = cv2.bitwise_not(frame)
         cv2.imwrite(img_path, frame)
-        open(os.path.join(labels_dir, label_filename), 'a').close()
+        # open(os.path.join(labels_dir, label_filename), 'a').close()
 
     cap.release()
 
 
 def main(args):
-
     os.makedirs(args.frames_dir, exist_ok=True)
-    os.makedirs(args.labels_dir, exist_ok=True)
+    # os.makedirs(args.labels_dir, exist_ok=True)
 
-    videos = [os.path.join(args.videos_dir, f) for f in os.listdir(args.videos_dir)
-              if f.lower().endswith(('.mp4', '.avi', '.mov', '.webm'))]
+    videos = [
+        os.path.join(args.videos_dir, f)
+        for f in os.listdir(args.videos_dir)
+        if f.lower().endswith((".mp4", ".avi", ".mov", ".webm"))
+    ]
     if not videos:
         print("No video files found in directory: {}".format(args.videos_dir))
         return
 
     for video in videos:
         print("Processing video: {}".format(video))
-        extract_frames(video, args.frames_dir,
-                       args.labels_dir, args.frames_per_video)
+        extract_frames(
+            video,
+            args.frames_dir,
+            args.labels_dir,
+            args.frames_per_video,
+            args.to_gray,
+            args.to_neg,
+        )
 
     print("Frames extraction completed.")
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract frames from videos.")
-    parser.add_argument('--videos_dir', type=str, required=True,
-                        help="Directory containing video files.")
-    parser.add_argument('--frames_dir', type=str, required=True,
-                        help="Directory to save extracted frames.")
-    parser.add_argument('--labels_dir', type=str,
-                        required=True, help="Directory to save labels.")
-    parser.add_argument('--frames_per_video', type=int, default=10,
-                        help="Number of frames to extract per video.")
+    parser.add_argument(
+        "--videos_dir",
+        type=str,
+        required=True,
+        help="Directory containing video files.",
+    )
+    parser.add_argument(
+        "--frames_dir",
+        type=str,
+        required=True,
+        help="Directory to save extracted frames.",
+    )
+    parser.add_argument(
+        "--labels_dir", type=str, default="./", help="Directory to save labels."
+    )
+    parser.add_argument(
+        "--frames_per_video",
+        type=int,
+        default=10,
+        help="Number of frames to extract per video.",
+    )
+
+    parser.add_argument(
+        "--to_gray",
+        type=bool,
+        default=False,
+        help="Decide whether to convert images to grayscale or not",
+    )
+
+    parser.add_argument(
+        "--to_neg",
+        type=bool,
+        default=False,
+        help="Decide whether to convert images to their negative or not",
+    )
 
     args = parser.parse_args()
     main(args)
