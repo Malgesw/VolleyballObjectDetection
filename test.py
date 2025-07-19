@@ -1,7 +1,11 @@
+import shutil
 from ultralytics import YOLO
+from train import preprocess
+model_version = "100_epochs_lines"
 
-model_version = "yolov8_50_epochs"
 
-model = YOLO(f"./runs_{model_version}/detect/yolo_train/weights/best.pt")
-
-model.predict(source="./test_cropped_frames/", save=True, imgsz=640)
+name_preprocess="lines"
+model = YOLO(f"./runs_{model_version}/detect/yolo_train_{name_preprocess}/weights/best.pt")
+preprocess("test_frames",name_preprocess)
+model.predict(source="test_frames"+name_preprocess, save=True, imgsz=640)
+shutil.rmtree("test_frames"+name_preprocess)
