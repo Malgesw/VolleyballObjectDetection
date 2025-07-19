@@ -1,10 +1,11 @@
 from ultralytics import YOLO
 
-model = YOLO("yolov8n.pt")
+num_epochs = 50
+model = YOLO(f"./models/yolov8n_{num_epochs}_epochs.pt")
 
 model.train(
     data="./dataset/data.yaml",
-    epochs=50,
+    epochs=num_epochs,
     batch=10,
     imgsz=640,
     device="cpu",
