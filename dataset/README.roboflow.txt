@@ -1,8 +1,8 @@
 
-volleyball court detection - v1 2025-07-15 12:36pm
+volleyball court detection - v4 2025-07-20 2:39am
 ==============================
 
-This dataset was exported via roboflow.com on July 15, 2025 at 3:38 PM GMT
+This dataset was exported via roboflow.com on July 20, 2025 at 12:40 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -21,8 +21,8 @@ The dataset includes 438 images.
 Objects are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
+* Auto-orientation of pixel data (with EXIF-orientation stripping)
 * Resize to 640x640 (Stretch)
-* Grayscale (CRT phosphor)
 
 No image augmentation techniques were applied.
 

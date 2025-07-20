@@ -43,6 +43,16 @@ def preprocess(source_dir, name, test=False):
                     _, thresh = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY)
                     cv2.imwrite(os.path.join(output_dir, filename), thresh)
 
+        case "threshold_negative":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY)
+                    thresh_neg = cv2.bitwise_not(thresh)
+                    cv2.imwrite(os.path.join(output_dir, filename), thresh_neg)
+
         case _:
             print(f"No preprocessing defined for: '{name}'")
 
@@ -58,10 +68,11 @@ def main():
         epochs=num_epochs,
         batch=10,
         imgsz=640,
-        device=0,
+        device="cpu",
         name="yolo_train_" + name_preprocess,
     )
     shutil.rmtree("dataset" + name_preprocess)
+    os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}")
 
 
 if __name__ == "__main__":

@@ -3,11 +3,12 @@ import os
 from ultralytics import YOLO
 from train import preprocess
 
-model_version = "100_epochs_lines"
-name_preprocess = "lines"
+model_version = "100_epochs_threshold"
+name_preprocess = "threshold"
 model = YOLO(
     f"./runs_{model_version}/detect/yolo_train_{name_preprocess}/weights/best.pt"
 )
+name_preprocess = "threshold_negative"
 preprocess("test_frames", name_preprocess, test=True)
 model.predict(source="test_frames" + name_preprocess, save=True, imgsz=640)
 shutil.rmtree("test_frames" + name_preprocess)
