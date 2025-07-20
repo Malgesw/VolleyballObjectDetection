@@ -6,7 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 
 
-def preprocess(source_dir, name):
+def preprocess(source_dir, name, test=False):
     src = source_dir
     dst = source_dir + name
     shutil.copytree(src, dst)
@@ -14,6 +14,8 @@ def preprocess(source_dir, name):
     input_dir = os.path.join(dst, "train", "images")
     output_dir = input_dir
     os.makedirs(output_dir, exist_ok=True)
+    if test:
+        input_dir = source_dir
 
     match name:
         case "lines":
@@ -23,7 +25,9 @@ def preprocess(source_dir, name):
                     img = cv2.imread(path)
                     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                     edges = cv2.Canny(gray, 50, 150)
-                    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10)
+                    lines = cv2.HoughLinesP(
+                        edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10
+                    )
                     if lines is not None:
                         for line in lines:
                             x1, y1, x2, y2 = line[0]
@@ -60,5 +64,5 @@ def main():
     shutil.rmtree("dataset" + name_preprocess)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
