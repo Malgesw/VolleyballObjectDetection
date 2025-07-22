@@ -16,6 +16,7 @@ def preprocess(source_dir, name, test=False):
     os.makedirs(output_dir, exist_ok=True)
     if test:
         input_dir = source_dir
+        output_dir = dst
 
     match name:
         case "lines":
@@ -53,6 +54,47 @@ def preprocess(source_dir, name, test=False):
                     thresh_neg = cv2.bitwise_not(thresh)
                     cv2.imwrite(os.path.join(output_dir, filename), thresh_neg)
 
+        case "threshold_white_orange":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    lower_white = np.array([0, 0, 200])
+                    upper_white = np.array([180, 40, 255])
+                    lower_orange = np.array([2, 150, 110])
+                    upper_orange = np.array([15, 255, 250])
+                    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+                    mask_purple = cv2.inRange(hsv, lower_orange, upper_orange)
+                    mask = cv2.bitwise_or(mask_white, mask_purple)
+                    result = cv2.bitwise_and(img, img, mask=mask)
+                    cv2.imwrite(os.path.join(output_dir, filename), result)
+
+        case "threshold_and_lines":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    lower_white = np.array([0, 0, 200])
+                    upper_white = np.array([180, 40, 255])
+                    lower_orange = np.array([2, 150, 110])
+                    upper_orange = np.array([15, 255, 250])
+                    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+                    mask_purple = cv2.inRange(hsv, lower_orange, upper_orange)
+                    mask = cv2.bitwise_or(mask_white, mask_purple)
+                    img = cv2.bitwise_and(img, img, mask=mask)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, 50, 150)
+                    lines = cv2.HoughLinesP(
+                        edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=30
+                    )
+                    if lines is not None:
+                        for line in lines:
+                            x1, y1, x2, y2 = line[0]
+                            cv2.line(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.imwrite(os.path.join(output_dir, filename), img)
+
         case _:
             print(f"No preprocessing defined for: '{name}'")
 
@@ -60,7 +102,7 @@ def preprocess(source_dir, name, test=False):
 def main():
     num_epochs = 100
     model = YOLO("yolov8n.pt")
-    name_preprocess = "threshold"
+    name_preprocess = "threshold_and_lines"
     preprocess("dataset", name_preprocess)
     data_path = "dataset" + name_preprocess + "/data.yaml"
     model.train(
@@ -68,7 +110,7 @@ def main():
         epochs=num_epochs,
         batch=10,
         imgsz=640,
-        device="cpu",
+        device=0,
         name="yolo_train_" + name_preprocess,
     )
     shutil.rmtree("dataset" + name_preprocess)
