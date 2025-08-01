@@ -41,7 +41,8 @@ def preprocess(source_dir, name, test=False):
                     path = os.path.join(input_dir, filename)
                     img = cv2.imread(path)
                     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    _, thresh = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY)
+                    _, thresh = cv2.threshold(
+                        gray, 210, 255, cv2.THRESH_BINARY)
                     cv2.imwrite(os.path.join(output_dir, filename), thresh)
 
         case "threshold_negative":
@@ -50,7 +51,8 @@ def preprocess(source_dir, name, test=False):
                     path = os.path.join(input_dir, filename)
                     img = cv2.imread(path)
                     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    _, thresh = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY)
+                    _, thresh = cv2.threshold(
+                        gray, 210, 255, cv2.THRESH_BINARY)
                     thresh_neg = cv2.bitwise_not(thresh)
                     cv2.imwrite(os.path.join(output_dir, filename), thresh_neg)
 
@@ -69,6 +71,26 @@ def preprocess(source_dir, name, test=False):
                     mask = cv2.bitwise_or(mask_white, mask_purple)
                     result = cv2.bitwise_and(img, img, mask=mask)
                     cv2.imwrite(os.path.join(output_dir, filename), result)
+
+        case "threshold_opening":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(
+                        gray, 210, 255, cv2.THRESH_BINARY)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 6))
+                    no_lines_vert = cv2.morphologyEx(
+                        thresh, cv2.MORPH_OPEN, kernel)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (6, 1))
+                    no_lines = cv2.morphologyEx(
+                        no_lines_vert, cv2.MORPH_OPEN, kernel)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                    no_lines = cv2.morphologyEx(
+                        no_lines, cv2.MORPH_OPEN, kernel)
+                    only_lines = cv2.subtract(thresh, no_lines)
+                    cv2.imwrite(os.path.join(output_dir, filename), only_lines)
 
         case "threshold_and_lines":
             for filename in os.listdir(input_dir):
@@ -95,6 +117,30 @@ def preprocess(source_dir, name, test=False):
                             cv2.line(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.imwrite(os.path.join(output_dir, filename), img)
 
+        case "threshold_hitmiss":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(
+                        gray, 210, 255, cv2.THRESH_BINARY)
+                    # Horizontal line pattern
+                    kernel_h = np.array(
+                        [[0, 0], [1, 1], [0, 0]], dtype=np.uint8)
+
+                    # Vertical line pattern
+                    kernel_v = np.array([[0, 1, 0], [0, 1, 0]], dtype=np.uint8)
+
+                    hitmiss_h = cv2.morphologyEx(
+                        thresh, cv2.MORPH_HITMISS, kernel_h)
+                    hitmiss_v = cv2.morphologyEx(
+                        thresh, cv2.MORPH_HITMISS, kernel_v)
+
+                    # Combine the hits (detected lines)
+                    lines = cv2.bitwise_or(hitmiss_h, hitmiss_v)
+                    cv2.imwrite(os.path.join(output_dir, filename), lines)
+                    
         case _:
             print(f"No preprocessing defined for: '{name}'")
 
