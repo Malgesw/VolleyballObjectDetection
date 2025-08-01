@@ -182,7 +182,8 @@ def main():
         imgsz=640,
         device=device,
         name="yolo_train_" + name_preprocess + params,
-        lr0 = lr0
+        lr0 = lr0,
+        weight_decay=weight_decay
     )
     shutil.rmtree("dataset" + name_preprocess)
     os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}{params}")
