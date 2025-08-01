@@ -3,12 +3,13 @@ import shutil
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 
-def preprocess(source_dir, name, test=False):
+def preprocess(source_dir, name, params="", test=False):
     src = source_dir
-    dst = source_dir + name
+    dst = source_dir + name + params
     shutil.copytree(src, dst)
 
     input_dir = os.path.join(dst, "train", "images")
@@ -17,6 +18,9 @@ def preprocess(source_dir, name, test=False):
     if test:
         input_dir = source_dir
         output_dir = dst
+    
+    if test:
+        print(f"Preprocess chosen: {name}")
 
     match name:
         case "lines":
@@ -146,21 +150,42 @@ def preprocess(source_dir, name, test=False):
 
 
 def main():
-    num_epochs = 100
     model = YOLO("yolov8n.pt")
     name_preprocess = "threshold_and_lines"
     preprocess("dataset", name_preprocess)
     data_path = "dataset" + name_preprocess + "/data.yaml"
+    num_epochs = 100
+    lr0 = 1e-4
+    batch_size = 10
+    weight_decay = 0.0003
+
+    assert batch_size is not None
+
+    params_dict = {
+        "lr0": lr0 if lr0 is not None else 0.01, # default value for initial learning rate
+        "weight_decay": weight_decay if weight_decay is not None else 0.0005, # default value for weight decay
+        "batch_size": batch_size
+    }
+    params = ""
+    for name, value in params_dict.items():
+        params = params + "_" + name + "=" + str(value)
+
+    with open(f"params_{name_preprocess}.txt", "w") as file:
+        file.write(params)
+
+    device = 0 if torch.cuda.is_available() else 'cpu'
+
     model.train(
         data=data_path,
         epochs=num_epochs,
-        batch=10,
+        batch=batch_size,
         imgsz=640,
-        device=0,
-        name="yolo_train_" + name_preprocess,
+        device=device,
+        name="yolo_train_" + name_preprocess + params,
+        lr0 = lr0
     )
     shutil.rmtree("dataset" + name_preprocess)
-    os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}")
+    os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}{params}")
 
 
 if __name__ == "__main__":

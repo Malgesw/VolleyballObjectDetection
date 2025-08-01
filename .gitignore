@@ -1,4 +1,5 @@
 Videos/*.mp4
 test_videos/
 __pycache__/
+.vscode/
 
