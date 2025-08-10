@@ -5,8 +5,21 @@ import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
+import albumentations as A
+import ultralytics.data.augment as ua
 
+class _NoAlbumentations:
+    def __init__(self, *args, **kwargs):
+        # keep fields Ultralytics expects
+        self.p = 0.0
+        self.transform = None
+        self.contains_spatial = False
 
+    def __call__(self, labels):
+        # return labels unchanged; no augmentation applied
+        return labels
+orig = ua.Albumentations
+ua.Albumentations = _NoAlbumentations
 def preprocess(source_dir, name, params="", test=False):
     src = source_dir
     dst = source_dir + name + params
@@ -18,7 +31,7 @@ def preprocess(source_dir, name, params="", test=False):
     if test:
         input_dir = source_dir
         output_dir = dst
-    
+
     if test:
         print(f"Preprocess chosen: {name}")
 
@@ -144,14 +157,46 @@ def preprocess(source_dir, name, params="", test=False):
                     # Combine the hits (detected lines)
                     lines = cv2.bitwise_or(hitmiss_h, hitmiss_v)
                     cv2.imwrite(os.path.join(output_dir, filename), lines)
-                    
+
+        case "augmented_threshold_and_lines":
+            for filename in os.listdir(input_dir):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    transform = A.Compose([
+                        A.CoarseDropout(
+                            num_holes_range=(2, 8),
+                            hole_height_range=(2, 20),
+                            hole_width_range=(2, 20),
+                            fill=0,
+                            p=0.6
+                        )
+                    ])
+                    img = transform(image=img)['image']
+                    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    lower_white = np.array([0, 0, 170])
+                    upper_white = np.array([180, 70, 255])
+                    lower_orange = np.array([2, 150, 110])
+                    upper_orange = np.array([15, 255, 250])
+                    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+                    mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
+                    mask = cv2.bitwise_or(mask_white, mask_orange)
+                    img_masked = cv2.bitwise_and(img, img, mask=mask)
+                    gray = cv2.cvtColor(img_masked, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, 50, 150)
+                    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=30)
+                    if lines is not None:
+                        for line in lines:
+                            x1, y1, x2, y2 = line[0]
+                            cv2.line(img_masked, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.imwrite(os.path.join(output_dir, filename), img_masked)
         case _:
             print(f"No preprocessing defined for: '{name}'")
 
 
 def main():
     model = YOLO("yolov8n.pt")
-    name_preprocess = "threshold_and_lines"
+    name_preprocess = "augmented_threshold_and_lines"
     preprocess("dataset", name_preprocess)
     data_path = "dataset" + name_preprocess + "/data.yaml"
     num_epochs = 100
@@ -162,8 +207,8 @@ def main():
     assert batch_size is not None
 
     params_dict = {
-        "lr0": lr0 if lr0 is not None else 0.01, # default value for initial learning rate
-        "weight_decay": weight_decay if weight_decay is not None else 0.0005, # default value for weight decay
+        "lr0": lr0 if lr0 is not None else 0.01,  # default value for initial learning rate
+        "weight_decay": weight_decay if weight_decay is not None else 0.0005,  # default value for weight decay
         "batch_size": batch_size
     }
     params = ""
@@ -174,17 +219,34 @@ def main():
         file.write(params)
 
     device = 0 if torch.cuda.is_available() else 'cpu'
-
-    model.train(
-        data=data_path,
-        epochs=num_epochs,
-        batch=batch_size,
-        imgsz=640,
-        device=device,
-        name="yolo_train_" + name_preprocess + params,
-        lr0 = lr0,
-        weight_decay=weight_decay
-    )
+    try:
+        model.train(
+            data=data_path,
+            epochs=num_epochs,
+            batch=batch_size,
+            imgsz=640,
+            device=device,
+            name="yolo_train_" + name_preprocess + params,
+            lr0=lr0,
+            weight_decay=weight_decay,
+            augment=False,
+            mosaic=0.0,
+            mixup=0.0,
+            cutmix=0.0,
+            copy_paste=0.0,
+            degrees=0.0,
+            translate=0.0,
+            scale=0.0,
+            shear=0.0,
+            perspective=0.0,
+            hsv_h=0.0,
+            hsv_s=0.0,
+            hsv_v=0.0,
+            fliplr=0.0,
+            flipud=0.0,
+        )
+    finally:
+        ua.Albumentations = orig
     shutil.rmtree("dataset" + name_preprocess)
     os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}{params}")
 
