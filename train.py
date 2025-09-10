@@ -20,6 +20,14 @@ class _NoAlbumentations:
         return labels
 orig = ua.Albumentations
 ua.Albumentations = _NoAlbumentations
+def get_label_dir_from_images_dir(images_dir):
+    if os.path.sep + "images" + os.path.sep in images_dir:
+        return images_dir.replace(os.path.sep + "images" + os.path.sep,
+                                  os.path.sep + "labels" + os.path.sep)
+    if images_dir.endswith(os.path.sep + "images") or images_dir.endswith("images"):
+        return images_dir.rsplit(os.path.sep + "images", 1)[0] + os.path.sep + "labels"
+    parent = os.path.dirname(images_dir)
+    return os.path.join(parent, "labels")
 def preprocess(source_dir, name, params="", test=False):
     src = source_dir
     dst = source_dir + name + params
@@ -27,6 +35,8 @@ def preprocess(source_dir, name, params="", test=False):
 
     input_dir = os.path.join(dst, "train", "images")
     output_dir = input_dir
+    input_dir_val= os.path.join(dst, "valid","images")
+    output_dir_val= input_dir_val
     os.makedirs(output_dir, exist_ok=True)
     if test:
         input_dir = source_dir
@@ -115,8 +125,8 @@ def preprocess(source_dir, name, params="", test=False):
                     path = os.path.join(input_dir, filename)
                     img = cv2.imread(path)
                     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                    lower_white = np.array([0, 0, 200])
-                    upper_white = np.array([180, 40, 255])
+                    lower_white = np.array([0, 0, 170])
+                    upper_white = np.array([180, 70, 255])
                     lower_orange = np.array([2, 150, 110])
                     upper_orange = np.array([15, 255, 250])
                     mask_white = cv2.inRange(hsv, lower_white, upper_white)
@@ -159,20 +169,55 @@ def preprocess(source_dir, name, params="", test=False):
                     cv2.imwrite(os.path.join(output_dir, filename), lines)
 
         case "augmented_threshold_and_lines":
+            img_size = 640
+            input_label_dir = get_label_dir_from_images_dir(input_dir)
+            output_label_dir = get_label_dir_from_images_dir(output_dir)
+            if not os.path.exists(input_label_dir):
+                print(
+                    f"WARNING: label dir '{input_label_dir}' does not exist.")
+            transform = A.Compose([
+                A.RandomScale(scale_limit=0.3, p=0.5),
+                A.PadIfNeeded(min_height=img_size, min_width=img_size, border_mode=0, p=1.0),
+                A.RandomCrop(height=img_size, width=img_size, p=1.0),
+                A.Perspective(scale=(0.05, 0.15), p=0.5),
+
+                A.OneOf([
+                    A.RandomBrightnessContrast(p=0.5),
+                    A.HueSaturationValue(p=0.5),
+                ], p=0.5),
+                A.MotionBlur(p=0.2),
+                A.GaussNoise(p=0.2),
+
+                A.Resize(img_size, img_size)
+            ],
+                bbox_params=A.BboxParams(
+                    format='yolo',
+                    label_fields=['class_labels']
+                )
+            )
             for filename in os.listdir(input_dir):
                 if filename.endswith(".jpg") or filename.endswith(".png"):
                     path = os.path.join(input_dir, filename)
                     img = cv2.imread(path)
-                    transform = A.Compose([
-                        A.CoarseDropout(
-                            num_holes_range=(2, 8),
-                            hole_height_range=(2, 20),
-                            hole_width_range=(2, 20),
-                            fill=0,
-                            p=0.6
-                        )
-                    ])
-                    img = transform(image=img)['image']
+                    base = os.path.splitext(filename)[0]
+                    label_path = os.path.join(input_label_dir, base + ".txt")
+                    bboxes = []
+                    class_labels = []
+                    if os.path.exists(label_path):
+                        with open(label_path, "r") as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if len(parts) != 5:
+                                    continue
+                                cls, x, y, w, h = parts
+                                bboxes.append([float(x), float(y), float(w), float(h)])
+                                class_labels.append(cls)
+                    else:
+                        pass
+                    transformed = transform(image=img, bboxes=bboxes, class_labels=class_labels)
+                    img = transformed['image']
+                    bboxes_t = transformed.get('bboxes', [])
+                    class_labels_t = transformed.get('class_labels', [])
                     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
                     lower_white = np.array([0, 0, 170])
                     upper_white = np.array([180, 70, 255])
@@ -190,6 +235,56 @@ def preprocess(source_dir, name, params="", test=False):
                             x1, y1, x2, y2 = line[0]
                             cv2.line(img_masked, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.imwrite(os.path.join(output_dir, filename), img_masked)
+                    out_label_path = os.path.join(output_label_dir, base + ".txt")
+                    with open(out_label_path, "w") as f:
+                        for cls, (x, y, w, h) in zip(class_labels_t, bboxes_t):
+                            f.write(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n")
+            input_label_dir = get_label_dir_from_images_dir(input_dir_val)
+            output_label_dir = get_label_dir_from_images_dir(output_dir_val)
+            for filename in os.listdir(input_dir_val):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    path = os.path.join(input_dir_val, filename)
+                    img = cv2.imread(path)
+                    base = os.path.splitext(filename)[0]
+                    label_path = os.path.join(input_label_dir, base + ".txt")
+                    bboxes = []
+                    class_labels = []
+                    if os.path.exists(label_path):
+                        with open(label_path, "r") as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if len(parts) != 5:
+                                    continue
+                                cls, x, y, w, h = parts
+                                bboxes.append([float(x), float(y), float(w), float(h)])
+                                class_labels.append(cls)
+                    else:
+                        pass
+                    transformed = transform(image=img, bboxes=bboxes, class_labels=class_labels)
+                    img = transformed['image']
+                    bboxes_t = transformed.get('bboxes', [])
+                    class_labels_t = transformed.get('class_labels', [])
+                    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    lower_white = np.array([0, 0, 170])
+                    upper_white = np.array([180, 70, 255])
+                    lower_orange = np.array([2, 150, 110])
+                    upper_orange = np.array([15, 255, 250])
+                    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+                    mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
+                    mask = cv2.bitwise_or(mask_white, mask_orange)
+                    img_masked = cv2.bitwise_and(img, img, mask=mask)
+                    gray = cv2.cvtColor(img_masked, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, 50, 150)
+                    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=30)
+                    if lines is not None:
+                        for line in lines:
+                            x1, y1, x2, y2 = line[0]
+                            cv2.line(img_masked, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.imwrite(os.path.join(output_dir_val, filename), img_masked)
+                    out_label_path = os.path.join(output_label_dir, base + ".txt")
+                    with open(out_label_path, "w") as f:
+                        for cls, (x, y, w, h) in zip(class_labels_t, bboxes_t):
+                            f.write(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n")
         case _:
             print(f"No preprocessing defined for: '{name}'")
 
@@ -203,7 +298,6 @@ def main():
     lr0 = 1e-4
     batch_size = 10
     weight_decay = 0.0003
-
     assert batch_size is not None
 
     params_dict = {
