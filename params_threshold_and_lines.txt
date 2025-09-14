@@ -1,1 +1,1 @@
-_lr0=0.0001_weight_decay=0.0003_batch_size=10
+_lr0=0.01_weight_decay=0.0005_batch_size=10_cls=0.5
