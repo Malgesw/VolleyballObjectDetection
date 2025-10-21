@@ -295,15 +295,18 @@ def main():
     preprocess("dataset", name_preprocess)
     data_path = "dataset" + name_preprocess + "/data.yaml"
     num_epochs = 100
-    lr0 = 1e-4
+    lr0 = None
     batch_size = 10
-    weight_decay = 0.0003
+    weight_decay = None
+    cls = None
+
     assert batch_size is not None
 
     params_dict = {
-        "lr0": lr0 if lr0 is not None else 0.01,  # default value for initial learning rate
-        "weight_decay": weight_decay if weight_decay is not None else 0.0005,  # default value for weight decay
-        "batch_size": batch_size
+        "lr0": lr0 if lr0 is not None else 0.01, # default value for initial learning rate
+        "weight_decay": weight_decay if weight_decay is not None else 0.0005, # default value for weight decay
+        "batch_size": batch_size,
+        "cls": cls if cls is not None else 0.5 # default value for classification learning strength
     }
     params = ""
     for name, value in params_dict.items():
@@ -313,34 +316,18 @@ def main():
         file.write(params)
 
     device = 0 if torch.cuda.is_available() else 'cpu'
-    try:
-        model.train(
-            data=data_path,
-            epochs=num_epochs,
-            batch=batch_size,
-            imgsz=640,
-            device=device,
-            name="yolo_train_" + name_preprocess + params,
-            lr0=lr0,
-            weight_decay=weight_decay,
-            augment=False,
-            mosaic=0.0,
-            mixup=0.0,
-            cutmix=0.0,
-            copy_paste=0.0,
-            degrees=0.0,
-            translate=0.0,
-            scale=0.0,
-            shear=0.0,
-            perspective=0.0,
-            hsv_h=0.0,
-            hsv_s=0.0,
-            hsv_v=0.0,
-            fliplr=0.0,
-            flipud=0.0,
-        )
-    finally:
-        ua.Albumentations = orig
+
+    model.train(
+        data=data_path,
+        epochs=num_epochs,
+        batch=params_dict["batch_size"],
+        imgsz=640,
+        device=device,
+        name="yolo_train_" + name_preprocess + params,
+        lr0 = params_dict["lr0"],
+        weight_decay=params_dict["weight_decay"],
+        cls=params_dict["cls"],
+    )
     shutil.rmtree("dataset" + name_preprocess)
     os.rename("./runs", f"./runs_{num_epochs}_epochs_{name_preprocess}{params}")
 
