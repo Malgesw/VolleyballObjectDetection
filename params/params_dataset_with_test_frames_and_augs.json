@@ -1,0 +1,7 @@
+{
+    "lr0": 0.01,
+    "weight_decay": 0.0005,
+    "batch_size": 10,
+    "cls": 0.5,
+    "epochs": 100
+}
