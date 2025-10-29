@@ -1,0 +1,5 @@
+names:
+- ball
+nc: 1
+train: C:/Users/gabri/Documents/GitHub/VOD/datasets/dataset_ball_blurred/train/images
+val: C:/Users/gabri/Documents/GitHub/VOD/datasets/dataset_ball_blurred/valid/images

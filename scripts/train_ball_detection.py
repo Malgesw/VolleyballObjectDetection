@@ -1,50 +1,54 @@
 from ultralytics import YOLO
-import torch
+from config import TrainBallConfig
+from preprocess_utils import apply_preprocessing, save_params
 import os
+import shutil
 
 def main():
-    # Dataset già pronto (croppato + label corrette)
-    dataset_path = "dataset_ball_aug"
-    data_path = os.path.join(dataset_path, "data.yaml")
+    config = TrainBallConfig()
+    print(f"[INFO] Starting training for dataset: {config.dataset_name}")
+    print(f"[INFO] Using device: {config.device}")
+    print(f"[INFO] Dataset path: {config.dataset_path}")
 
-    # Parametri di training
-    num_epochs = 50
-    lr0 = 1e-4
-    batch_size = 8
-    weight_decay = 0.0003
+    # Optional preprocessing
+    if hasattr(config, "preprocess_name") and config.preprocess_name:
+        apply_preprocessing(config.dataset_path, config.preprocess_name)
 
+    # Load YOLO model
+    model = YOLO(config.model_name)
+
+    # Save training params (optional)
     params_dict = {
-        "lr0": lr0,
-        "weight_decay": weight_decay,
-        "batch_size": batch_size
+        "lr0": config.lr0,
+        "weight_decay": config.weight_decay,
+        "batch_size": config.batch_size,
+        "cls": config.cls,
+        "epochs": config.num_epochs
     }
-    params = "".join([f"_{k}={v}" for k, v in params_dict.items()])
+    save_params(params_dict, config.dataset_name)
 
-    # Se hai GPU usa CUDA
-    device = 0 if torch.cuda.is_available() else 'cpu'
-
-    # Carica modello pre-addestrato (più grande di "n" se puoi)
-    model = YOLO("yolov8s.pt")  # puoi provare anche "yolov8m.pt" se hai VRAM
-
-    # Training
+    # Train
     model.train(
-        data=data_path,
-        epochs=num_epochs,
-        batch=batch_size,
-        imgsz=640,
-        device=device,
-        name="yolo_train_ball" + params,
-        lr0=lr0,
-        weight_decay=weight_decay,
-        augment=True,   # attiva tutte le augm. di default
-        mosaic=0.5,
-        mixup=0.1,
-        copy_paste=0.1,
-        patience=20     # early stopping
+        data=str(config.data_yaml),
+        epochs=config.num_epochs,
+        save_period=config.save_period,
+        batch=params_dict["batch_size"],
+        imgsz=config.imgsz,
+        device=config.device,
+        name=f"yolo_train_{config.dataset_name}",
+        lr0=params_dict["lr0"],
+        weight_decay=params_dict["weight_decay"],
+        cls=params_dict["cls"]
     )
 
-    print("✅ Training completato!")
+    # Move YOLO runs folder to project root
+    src_folder = os.path.join("runs/detect", f"yolo_train_{config.dataset_name}")
+    dst_folder = os.path.join(config.runs_dir, f"yolo_train_{config.dataset_name}")
+    if os.path.exists(dst_folder):
+        shutil.rmtree(dst_folder)
+    shutil.move(src_folder, dst_folder)
 
+    print(f"[INFO] Training complete. Runs folder saved to {dst_folder}")
 
 if __name__ == "__main__":
     main()

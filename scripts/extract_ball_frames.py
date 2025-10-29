@@ -2,10 +2,10 @@ import os
 import subprocess
 
 # Percorso della cartella con i video
-video_folder = r"E:\Politecnico\Image Processing & Computer Vision\VolleyballObjectDetection\Video"
+video_folder = r"C:\Users\gabri\Downloads\test_video_4"
 
 # Cartella di destinazione dei frame
-output_folder = r"E:\Politecnico\Image Processing & Computer Vision\VolleyballObjectDetection\Ball_Frames"
+output_folder = r"C:\Users\gabri\Documents\GitHub\VOD\frames\ball_Frames\ball_frames_4"
 os.makedirs(output_folder, exist_ok=True)
 
 # Scorri tutti i file video nella cartella

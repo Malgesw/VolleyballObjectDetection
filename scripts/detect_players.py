@@ -3,12 +3,16 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import argparse
+from collections import deque
 
 FIELD_DETECT_INTERVAL = 5.0
 PEOPLE_DETECT_INTERVAL = 0.1
+BALL_DETECT_INTERVAL = 0.001
 FIELD_MODEL_PATH = "../runs/yolo_train_dataset_with_test_frames_and_augs/weights/best.pt"
 PEOPLE_MODEL_PATH = "../models/yolov8m.pt"
+BALL_MODEL_PATH = "../runs/yolo_train_dataset_ball_blurred/weights/best.pt"
 CONF_THRESHOLD = 0.35
+CONF_BALL = 0.35
 
 def preprocess_for_field(frame):
     img = frame.copy()
@@ -45,11 +49,10 @@ def extract_bboxes_from_results(results, label="player", conf_thresh=0.0):
 
     for b in res.boxes:
         xyxy = b.xyxy.cpu().numpy().astype(float).tolist()
-        conf = float(b.conf.cpu().numpy())
-        cls = int(b.cls.cpu().numpy())
+        conf = float(b.conf.cpu().numpy()[0])  # estrai il primo elemento
+        cls = int(b.cls.cpu().numpy()[0])      # estrai il primo elemento
         if conf < conf_thresh:
             continue
-
         boxes.append({"xyxy": xyxy, "conf": conf, "cls": cls, "label": label})
     return boxes
 
@@ -60,7 +63,7 @@ def choose_best_bbox(boxes):
     best = None
     best_conf = -1
     for b in boxes:
-        conf= b["conf"]
+        conf = b["conf"]
         if conf > best_conf:
             best_conf = conf
             best = b
@@ -71,10 +74,12 @@ def point_in_bbox(px, py, bbox):
     x1, y1, x2, y2 = bbox
     return (px >= x1) and (px <= x2) and (py >= y1) and (py <= y2)
 
+
 def main(args):
     print("Loading models...")
     field_model = YOLO(FIELD_MODEL_PATH)
     people_model = YOLO(PEOPLE_MODEL_PATH)
+    ball_model = YOLO(BALL_MODEL_PATH)
     print("Models loaded.")
 
     INPUT_SOURCE = f"../test_clip_{args.clip_number}.mp4"
@@ -83,11 +88,14 @@ def main(args):
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open source {INPUT_SOURCE}")
 
-
     last_field_time = -9999.0
     last_people_time = -9999.0
+    last_ball_time = -9999.0
 
     last_field_bbox = None
+    last_ball_bbox = None
+    ball_path = deque(maxlen=30)  # per tracciare la traiettoria
+
     last_people_boxes = []
     last_players = []
 
@@ -98,52 +106,84 @@ def main(args):
             break
 
         fps = cap.get(cv2.CAP_PROP_FPS)
-        delay = int((1/fps) * 1000) # delay in ms
+        delay = int((1 / fps) * 1000)
 
         now = time.time()
+
+        # ---------------- FIELD DETECTION ----------------
         if now - last_field_time >= FIELD_DETECT_INTERVAL:
             last_field_time = now
-            #pre = preprocess_for_field(frame)
             results = field_model(frame, imgsz=640, conf=CONF_THRESHOLD)
-            field_bboxes = extract_bboxes_from_results(results,label="field", conf_thresh=CONF_THRESHOLD)
+            field_bboxes = extract_bboxes_from_results(results, label="field", conf_thresh=CONF_THRESHOLD)
             chosen = choose_best_bbox(field_bboxes)
             if chosen:
-                last_field_bbox = chosen["xyxy"]
+                # estrai i valori dalla lista annidata
+                last_field_bbox = list(chosen["xyxy"][0]) if isinstance(chosen["xyxy"][0], (list, np.ndarray)) else list(chosen["xyxy"])
                 print(f"Field detected, bbox={last_field_bbox}, conf={chosen['conf']:.2f}")
             else:
                 print(f"Field not found on this run;")
 
+        # ---------------- PEOPLE DETECTION ----------------
         if now - last_people_time >= PEOPLE_DETECT_INTERVAL:
             last_people_time = now
-            results = people_model(frame, imgsz=640, conf=CONF_THRESHOLD,classes=[0], verbose=False) #on base yolov8n, 0 is the id for the person class
-            people_boxes = extract_bboxes_from_results(results,label="person", conf_thresh=CONF_THRESHOLD)
+            results = people_model(frame, imgsz=640, conf=CONF_THRESHOLD, classes=[0], verbose=False)
+            people_boxes = extract_bboxes_from_results(results, label="person", conf_thresh=CONF_THRESHOLD)
             last_people_boxes = people_boxes
+
             players = []
             if last_field_bbox is not None:
-                fx1, fy1, fx2, fy2 = last_field_bbox[0]
+                fx1, fy1, fx2, fy2 = last_field_bbox
                 for b in last_people_boxes:
-                    x1, y1, x2, y2 = b["xyxy"][0]
+                    x1, y1, x2, y2 = map(int, b["xyxy"][0])
                     lower_left_x = x1
                     lower_left_y = y2
                     if point_in_bbox(lower_left_x, lower_left_y, (fx1, fy1, fx2, fy2)):
                         players.append(b)
-            else:
-                players = []
-
             last_players = players
             print(f"People detected: {len(last_people_boxes)}, players on field: {len(last_players)}")
+
+            # ---------------- BALL DETECTION ----------------
+            results = ball_model(frame, imgsz=1280, conf=CONF_THRESHOLD, verbose=False)
+            ball_boxes = extract_bboxes_from_results(results, label="ball", conf_thresh=CONF_BALL)
+            best_ball = choose_best_bbox(ball_boxes)
+            if best_ball:
+                last_ball_bbox = list(best_ball["xyxy"][0]) if isinstance(best_ball["xyxy"][0], (list, np.ndarray)) else list(best_ball["xyxy"])
+                cx = int((last_ball_bbox[0] + last_ball_bbox[2]) / 2)
+                cy = int((last_ball_bbox[1] + last_ball_bbox[3]) / 2)
+                ball_path.append((cx, cy))
+            else:
+                last_ball_bbox = None
+                ball_path.append(None)
+
+        # ---------------- VISUALIZATION ----------------
         vis = frame.copy()
 
+        # Draw ball path
+        if len(ball_path) > 1:
+            for i in range(1, len(ball_path)):
+                if ball_path[i - 1] is None or ball_path[i] is None:
+                    continue
+                cv2.line(vis, ball_path[i - 1], ball_path[i], (0, 0, 255), 2)
+
+        # Draw current ball bbox
+        if last_ball_bbox is not None:
+            x1, y1, x2, y2 = map(int, last_ball_bbox)
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 0, 255), 2)  # rettangolo rosso
+            cv2.putText(vis, "BALL", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        # Draw field
         if last_field_bbox is not None:
-            x1, y1, x2, y2 = map(int, last_field_bbox[0])
+            x1, y1, x2, y2 = map(int, last_field_bbox)
             cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 200, 0), 3)
             cv2.putText(vis, "Field", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
 
+        # Draw people
         for b in last_people_boxes:
             x1, y1, x2, y2 = map(int, b["xyxy"][0])
             cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 200), 2)
             cv2.putText(vis, f"person", (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
 
+        # Draw players on field
         for b in last_players:
             x1, y1, x2, y2 = map(int, b["xyxy"][0])
             cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 0, 0), 3)
@@ -151,7 +191,7 @@ def main(args):
 
         vis = cv2.resize(vis, (1920, 1080))
         cv2.imshow("Volleyball Player Detection", vis)
-        key = cv2.waitKey(int(0.5*delay)) & 0xFF
+        key = cv2.waitKey(int(0.5 * delay)) & 0xFF
         if key == ord("q"):
             print("Quit requested.")
             break
