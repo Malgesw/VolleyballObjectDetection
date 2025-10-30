@@ -6,24 +6,19 @@ import shutil
 def main():
     config = TestBallConfig()
 
-    # Carica il modello
     model = YOLO(str(config.model_weights))
-
-    # Assicurati che la cartella delle predizioni esista
     os.makedirs("../predictions", exist_ok=True)
-    os.makedirs(config.runs_dir, exist_ok=True)  # cartella runs nella root
+    os.makedirs(config.runs_dir, exist_ok=True) 
 
-    # Esegui predizione direttamente sui frame originali
     results = model.predict(
-        source=str(config.test_frames_dir),  # direttamente i frame originali
+        source=str(config.test_frames_dir),  
         save=True,
         imgsz=config.imgsz,
-        project=config.runs_dir,   # salva i risultati in ../runs
-        name=f"yolo_test_{config.dataset_name}",  # cartella detect generata
+        project=config.runs_dir,   
+        name=f"yolo_test_{config.dataset_name}",  
         exist_ok=True
     )
 
-    # Salva predizioni TXT
     if config.save_predictions_txt:
         txt_file = f"../predictions/predictions_{config.dataset_name}.txt"
         with open(txt_file, "w") as f:

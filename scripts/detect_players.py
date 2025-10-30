@@ -49,8 +49,8 @@ def extract_bboxes_from_results(results, label="player", conf_thresh=0.0):
 
     for b in res.boxes:
         xyxy = b.xyxy.cpu().numpy().astype(float).tolist()
-        conf = float(b.conf.cpu().numpy()[0])  # estrai il primo elemento
-        cls = int(b.cls.cpu().numpy()[0])      # estrai il primo elemento
+        conf = float(b.conf.cpu().numpy()[0])  
+        cls = int(b.cls.cpu().numpy()[0])      
         if conf < conf_thresh:
             continue
         boxes.append({"xyxy": xyxy, "conf": conf, "cls": cls, "label": label})
@@ -94,7 +94,7 @@ def main(args):
 
     last_field_bbox = None
     last_ball_bbox = None
-    ball_path = deque(maxlen=30)  # per tracciare la traiettoria
+    ball_path = deque(maxlen=30) 
 
     last_people_boxes = []
     last_players = []

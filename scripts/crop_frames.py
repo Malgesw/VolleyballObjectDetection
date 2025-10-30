@@ -2,7 +2,6 @@ import os
 import cv2
 import argparse
 
-
 def resize_images(input_dir, output_dir, width=640, height=640):
     os.makedirs(output_dir, exist_ok=True)
     for fname in os.listdir(input_dir):
