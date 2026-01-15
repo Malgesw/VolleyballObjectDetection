@@ -1,3 +1,4 @@
+import math
 import time
 import cv2
 import numpy as np
@@ -7,12 +8,23 @@ from collections import deque
 
 FIELD_DETECT_INTERVAL = 5.0
 PEOPLE_DETECT_INTERVAL = 0.1
-BALL_DETECT_INTERVAL = 0.001
+BALL_DETECT_INTERVAL = 0.01
 FIELD_MODEL_PATH = "../runs/yolo_train_dataset_with_test_frames_and_augs/weights/best.pt"
 PEOPLE_MODEL_PATH = "../models/yolov8m.pt"
 BALL_MODEL_PATH = "../runs/yolo_train_dataset_ball_blurred/weights/best.pt"
-CONF_THRESHOLD = 0.35
-CONF_BALL = 0.35
+CONF_THRESHOLD = 0.3
+CONF_BALL = 0.3
+
+OUTPUT_W, OUTPUT_H = 1920, 1080
+ZOOM_MIN = 1.0
+ZOOM_MAX = 3.0
+ZOOM_SPEED = 1.0
+ZOOM_TRIGGER_FRAC = 0.09  # fraction of frame height; if ball within this distance to a player, trigger zoom
+ZOOM_OUT_DELAY = 1.0
+current_zoom = 1.0
+target_zoom = 1.0
+zoom_center = None
+
 
 def preprocess_for_field(frame):
     img = frame.copy()
@@ -49,8 +61,8 @@ def extract_bboxes_from_results(results, label="player", conf_thresh=0.0):
 
     for b in res.boxes:
         xyxy = b.xyxy.cpu().numpy().astype(float).tolist()
-        conf = float(b.conf.cpu().numpy()[0])  
-        cls = int(b.cls.cpu().numpy()[0])      
+        conf = float(b.conf.cpu().numpy()[0])  # estrai il primo elemento
+        cls = int(b.cls.cpu().numpy()[0])  # estrai il primo elemento
         if conf < conf_thresh:
             continue
         boxes.append({"xyxy": xyxy, "conf": conf, "cls": cls, "label": label})
@@ -75,7 +87,76 @@ def point_in_bbox(px, py, bbox):
     return (px >= x1) and (px <= x2) and (py >= y1) and (py <= y2)
 
 
+def get_bbox_coords(b):
+    xy = b["xyxy"]
+    if isinstance(xy[0], (list, tuple, np.ndarray)):
+        x1, y1, x2, y2 = xy[0]
+    else:
+        x1, y1, x2, y2 = xy
+    return float(x1), float(y1), float(x2), float(y2)
+
+
+def update_zoom(current, target, dt, speed=ZOOM_SPEED):
+    if dt <= 0:
+        return current
+    max_step = speed * dt
+    diff = target - current
+    if abs(diff) <= max_step:
+        return target
+    return current + max_step * (1 if diff > 0 else -1)
+
+
+def compute_distance(p1, p2):
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+
+def zoom_frame_and_get_mapping(frame, center, zoom, output_size=(OUTPUT_W, OUTPUT_H)):
+    orig_h, orig_w = frame.shape[0], frame.shape[1]
+    out_w, out_h = output_size
+    target_ar = out_w / out_h
+
+    base_crop_w = max(1, int(orig_w / zoom))
+    base_crop_h = max(1, int(orig_h / zoom))
+
+    if (base_crop_w / base_crop_h) > target_ar:
+        crop_h = base_crop_h
+        crop_w = max(1, int(crop_h * target_ar))
+    else:
+        crop_w = base_crop_w
+        crop_h = max(1, int(crop_w / target_ar))
+
+    cx, cy = int(center[0]), int(center[1])
+    crop_x1 = cx - crop_w // 2
+    crop_y1 = cy - crop_h // 2
+
+    crop_x1 = max(0, min(crop_x1, orig_w - crop_w))
+    crop_y1 = max(0, min(crop_y1, orig_h - crop_h))
+    crop_x2 = crop_x1 + crop_w
+    crop_y2 = crop_y1 + crop_h
+
+    crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+    if crop.shape[0] <= 0 or crop.shape[1] <= 0:
+        scale = out_w / orig_w
+        zoomed = cv2.resize(frame, (out_w, out_h))
+        return zoomed, 0, 0, scale
+
+    zoomed = cv2.resize(crop, (out_w, out_h))
+    scale = out_w / crop_w
+    return zoomed, crop_x1, crop_y1, scale
+
+
+def map_bbox_to_output(bbox, crop_x1, crop_y1, scale):
+    x1, y1, x2, y2 = bbox
+    nx1 = int((x1 - crop_x1) * scale)
+    ny1 = int((y1 - crop_y1) * scale)
+    nx2 = int((x2 - crop_x1) * scale)
+    ny2 = int((y2 - crop_y1) * scale)
+    return nx1, ny1, nx2, ny2
+
+
 def main(args):
+    global current_zoom, target_zoom, zoom_center
+
     print("Loading models...")
     field_model = YOLO(FIELD_MODEL_PATH)
     people_model = YOLO(PEOPLE_MODEL_PATH)
@@ -91,25 +172,24 @@ def main(args):
     last_field_time = -9999.0
     last_people_time = -9999.0
     last_ball_time = -9999.0
+    last_zoom_in_time = -9999.0
 
     last_field_bbox = None
     last_ball_bbox = None
-    ball_path = deque(maxlen=30) 
 
-    last_people_boxes = []
     last_players = []
+    last_frame_time = time.time()
 
+    chosen_center = (0, 0)
     while True:
         ret, frame = cap.read()
         if not ret:
             print("End of stream or frame read failed.")
             break
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        delay = int((1 / fps) * 1000)
-
         now = time.time()
-
+        dt = now - last_frame_time
+        last_frame_time = now
         # ---------------- FIELD DETECTION ----------------
         if now - last_field_time >= FIELD_DETECT_INTERVAL:
             last_field_time = now
@@ -118,7 +198,8 @@ def main(args):
             chosen = choose_best_bbox(field_bboxes)
             if chosen:
                 # estrai i valori dalla lista annidata
-                last_field_bbox = list(chosen["xyxy"][0]) if isinstance(chosen["xyxy"][0], (list, np.ndarray)) else list(chosen["xyxy"])
+                last_field_bbox = list(chosen["xyxy"][0]) if isinstance(chosen["xyxy"][0],
+                                                                        (list, np.ndarray)) else list(chosen["xyxy"])
                 print(f"Field detected, bbox={last_field_bbox}, conf={chosen['conf']:.2f}")
             else:
                 print(f"Field not found on this run;")
@@ -140,58 +221,104 @@ def main(args):
                     if point_in_bbox(lower_left_x, lower_left_y, (fx1, fy1, fx2, fy2)):
                         players.append(b)
             last_players = players
-            print(f"People detected: {len(last_people_boxes)}, players on field: {len(last_players)}")
 
             # ---------------- BALL DETECTION ----------------
-            results = ball_model(frame, imgsz=1280, conf=CONF_THRESHOLD, verbose=False)
+        if now - last_ball_time >= BALL_DETECT_INTERVAL:
+            last_ball_time = now
+            results = ball_model(frame, imgsz=1280, conf=CONF_BALL, verbose=False)
             ball_boxes = extract_bboxes_from_results(results, label="ball", conf_thresh=CONF_BALL)
             best_ball = choose_best_bbox(ball_boxes)
             if best_ball:
-                last_ball_bbox = list(best_ball["xyxy"][0]) if isinstance(best_ball["xyxy"][0], (list, np.ndarray)) else list(best_ball["xyxy"])
-                cx = int((last_ball_bbox[0] + last_ball_bbox[2]) / 2)
-                cy = int((last_ball_bbox[1] + last_ball_bbox[3]) / 2)
-                ball_path.append((cx, cy))
+                last_ball_bbox = list(best_ball["xyxy"][0]) if isinstance(best_ball["xyxy"][0],
+                                                                          (list, np.ndarray)) else list(
+                    best_ball["xyxy"])
             else:
                 last_ball_bbox = None
-                ball_path.append(None)
+
+        frame_h, frame_w = frame.shape[0], frame.shape[1]
+        zoom_trigger_dist = ZOOM_TRIGGER_FRAC * frame_h
+
+
+        if last_ball_bbox is not None:
+            bx1, by1, bx2, by2 = map(int, last_ball_bbox)
+            ball_cx = (bx1 + bx2) / 2.0
+            ball_cy = (by1 + by2) / 2.0
+            chosen_center = (ball_cx, ball_cy)
+
+        zoom_should_trigger = False
+        if last_ball_bbox is not None and len(last_players) > 0:
+            ball_center = (ball_cx, ball_cy)
+            min_dist = float("inf")
+            for p in last_players:
+                px1, py1, px2, py2 = get_bbox_coords(p)
+                p_cx = (px1 + px2) / 2.0
+                p_cy = (py1 + py2) / 2.0
+                d = compute_distance(ball_center, (p_cx, p_cy))
+                min_dist = min(min_dist, d)
+            if min_dist <= zoom_trigger_dist:
+                zoom_should_trigger = True
+
+        if zoom_should_trigger:
+            target_zoom = ZOOM_MAX
+            zoom_center = chosen_center
+            last_zoom_in_time = now
+        else:
+            if (now - last_zoom_in_time) >= ZOOM_OUT_DELAY:
+                target_zoom = ZOOM_MIN
+                if current_zoom <= 1.05:
+                    zoom_center = (frame_w//2, frame_h//2)
+            else:
+                target_zoom = ZOOM_MAX
+                zoom_center = chosen_center
+
+        current_zoom = update_zoom(current_zoom, target_zoom, dt, speed=ZOOM_SPEED)
+        current_zoom = max(ZOOM_MIN, min(ZOOM_MAX, current_zoom))
 
         # ---------------- VISUALIZATION ----------------
-        vis = frame.copy()
+
+
+        zoomed, crop_x1, crop_y1, scale = zoom_frame_and_get_mapping(frame, zoom_center, current_zoom,
+                                                                     output_size=(OUTPUT_W, OUTPUT_H))
+
+        vis = zoomed.copy()
 
         # Draw ball path
-        if len(ball_path) > 1:
+        """if len(ball_path) > 1:
             for i in range(1, len(ball_path)):
                 if ball_path[i - 1] is None or ball_path[i] is None:
                     continue
-                cv2.line(vis, ball_path[i - 1], ball_path[i], (0, 0, 255), 2)
+                cv2.line(vis, ball_path[i - 1], ball_path[i], (0, 0, 255), 2)"""
 
-        # Draw current ball bbox
+        # Draw current ball bbox (mapped)
         if last_ball_bbox is not None:
-            x1, y1, x2, y2 = map(int, last_ball_bbox)
-            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 0, 255), 2)  # rettangolo rosso
-            cv2.putText(vis, "BALL", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            bx1, by1, bx2, by2 = map(int, last_ball_bbox)
+            nbx1, nby1, nbx2, nby2 = map_bbox_to_output((bx1, by1, bx2, by2), crop_x1, crop_y1, scale)
+            cv2.rectangle(vis, (nbx1, nby1), (nbx2, nby2), (0, 0, 255), 2)
+            cv2.putText(vis, "BALL", (nbx1, max(0, nby1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-        # Draw field
+        # Draw field bbox if available
         if last_field_bbox is not None:
-            x1, y1, x2, y2 = map(int, last_field_bbox)
-            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 200, 0), 3)
-            cv2.putText(vis, "Field", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
+            fx1, fy1, fx2, fy2 = map(int, last_field_bbox)
+            nfx1, nfy1, nfx2, nfy2 = map_bbox_to_output((fx1, fy1, fx2, fy2), crop_x1, crop_y1, scale)
+            cv2.rectangle(vis, (nfx1, nfy1), (nfx2, nfy2), (0, 200, 0), 3)
+            cv2.putText(vis, "Field", (nfx1, max(0, nfy1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
+
+        # Draw players (players on field)
+        for b in last_players:
+            x1, y1, x2, y2 = map(int, get_bbox_coords(b))
+            nx1, ny1, nx2, ny2 = map_bbox_to_output((x1, y1, x2, y2), crop_x1, crop_y1, scale)
+            cv2.rectangle(vis, (nx1, ny1), (nx2, ny2), (255, 0, 0), 3)
+            cv2.putText(vis, f"PLAYER", (nx1, ny2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
         # Draw people
-        for b in last_people_boxes:
+        """for b in last_people_boxes:
             x1, y1, x2, y2 = map(int, b["xyxy"][0])
             cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 200), 2)
-            cv2.putText(vis, f"person", (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+            cv2.putText(vis, f"person", (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)"""
 
-        # Draw players on field
-        for b in last_players:
-            x1, y1, x2, y2 = map(int, b["xyxy"][0])
-            cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 0, 0), 3)
-            cv2.putText(vis, f"PLAYER", (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
-        vis = cv2.resize(vis, (1920, 1080))
         cv2.imshow("Volleyball Player Detection", vis)
-        key = cv2.waitKey(int(0.5 * delay)) & 0xFF
+        key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             print("Quit requested.")
             break
