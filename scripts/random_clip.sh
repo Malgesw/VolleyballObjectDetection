@@ -16,26 +16,26 @@ if [ $# -lt 3 ]; then
   exit 1
 fi
 
-# Get video duration in seconds (integer)
+# get video duration in seconds (integer)
 duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input")
 duration=${duration%.*}
 
-# Ensure clip is shorter than video
+# ensure clip is shorter than video
 if (( clip_length >= duration )); then
   echo "Error: Clip length must be shorter than video duration ($duration s)."
   exit 1
 fi
 
-# Calculate max possible start time
+# calculate max possible start time
 max_start=$((duration - clip_length))
 
-# Pick a random start time
+# pick a random start time
 start_time=$((RANDOM % (max_start + 1)))
 
-echo "🎲 Video duration: ${duration}s"
-echo "🎬 Extracting ${clip_length}s clip starting at ${start_time}s..."
+echo "Video duration: ${duration}s"
+echo "Extracting ${clip_length}s clip starting at ${start_time}s..."
 
-# Extract clip using ffmpeg
+# extract clip using ffmpeg
 ffmpeg -ss "$start_time" -i "$input" -t "$clip_length" -c copy "$output" -y
 
-echo "✅ Random clip saved to: $output"
+echo "Random clip saved to: $output"

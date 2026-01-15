@@ -83,7 +83,7 @@ def preprocess(source_dir: str, method: str, test: bool = False):
             case _:
                 print(f"[WARNING] No preprocessing defined for method '{method}'")
 
-        # Save processed image
+        # save processed image
         cv2.imwrite(os.path.join(dst, filename), img)
 
 

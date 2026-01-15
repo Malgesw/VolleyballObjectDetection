@@ -21,6 +21,7 @@ ZOOM_MAX = 3.0
 ZOOM_SPEED = 1.0
 ZOOM_TRIGGER_FRAC = 0.09  # fraction of frame height; if ball within this distance to a player, trigger zoom
 ZOOM_OUT_DELAY = 1.0
+BALL_DISTANCE_TOL = 400
 current_zoom = 1.0
 target_zoom = 1.0
 zoom_center = None
@@ -197,7 +198,6 @@ def main(args):
             field_bboxes = extract_bboxes_from_results(results, label="field", conf_thresh=CONF_THRESHOLD)
             chosen = choose_best_bbox(field_bboxes)
             if chosen:
-                # estrai i valori dalla lista annidata
                 last_field_bbox = list(chosen["xyxy"][0]) if isinstance(chosen["xyxy"][0],
                                                                         (list, np.ndarray)) else list(chosen["xyxy"])
                 print(f"Field detected, bbox={last_field_bbox}, conf={chosen['conf']:.2f}")
@@ -238,12 +238,12 @@ def main(args):
         frame_h, frame_w = frame.shape[0], frame.shape[1]
         zoom_trigger_dist = ZOOM_TRIGGER_FRAC * frame_h
 
-
         if last_ball_bbox is not None:
             bx1, by1, bx2, by2 = map(int, last_ball_bbox)
             ball_cx = (bx1 + bx2) / 2.0
             ball_cy = (by1 + by2) / 2.0
-            chosen_center = (ball_cx, ball_cy)
+            if zoom_center is not None and np.linalg.norm(np.array(zoom_center) - np.array((ball_cx, ball_cy))) < BALL_DISTANCE_TOL:
+                chosen_center = (ball_cx, ball_cy)
 
         zoom_should_trigger = False
         if last_ball_bbox is not None and len(last_players) > 0:
@@ -282,35 +282,35 @@ def main(args):
 
         vis = zoomed.copy()
 
-        # Draw ball path
+        # draw ball path
         """if len(ball_path) > 1:
             for i in range(1, len(ball_path)):
                 if ball_path[i - 1] is None or ball_path[i] is None:
                     continue
                 cv2.line(vis, ball_path[i - 1], ball_path[i], (0, 0, 255), 2)"""
 
-        # Draw current ball bbox (mapped)
+        # draw current ball bbox
         if last_ball_bbox is not None:
             bx1, by1, bx2, by2 = map(int, last_ball_bbox)
             nbx1, nby1, nbx2, nby2 = map_bbox_to_output((bx1, by1, bx2, by2), crop_x1, crop_y1, scale)
             cv2.rectangle(vis, (nbx1, nby1), (nbx2, nby2), (0, 0, 255), 2)
             cv2.putText(vis, "BALL", (nbx1, max(0, nby1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-        # Draw field bbox if available
+        # draw field bbox if available
         if last_field_bbox is not None:
             fx1, fy1, fx2, fy2 = map(int, last_field_bbox)
             nfx1, nfy1, nfx2, nfy2 = map_bbox_to_output((fx1, fy1, fx2, fy2), crop_x1, crop_y1, scale)
             cv2.rectangle(vis, (nfx1, nfy1), (nfx2, nfy2), (0, 200, 0), 3)
             cv2.putText(vis, "Field", (nfx1, max(0, nfy1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
 
-        # Draw players (players on field)
+        # draw players (players on field)
         for b in last_players:
             x1, y1, x2, y2 = map(int, get_bbox_coords(b))
             nx1, ny1, nx2, ny2 = map_bbox_to_output((x1, y1, x2, y2), crop_x1, crop_y1, scale)
             cv2.rectangle(vis, (nx1, ny1), (nx2, ny2), (255, 0, 0), 3)
             cv2.putText(vis, f"PLAYER", (nx1, ny2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
-        # Draw people
+        # draw people
         """for b in last_people_boxes:
             x1, y1, x2, y2 = map(int, b["xyxy"][0])
             cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 200), 2)

@@ -7,13 +7,13 @@ import shutil
 def main():
     config = TrainConfig()
 
-    # Optional preprocessing
+    # optional preprocessing
     apply_preprocessing(config.dataset_path, config.preprocess_name)
 
-    # Load YOLO model
+    # load YOLO model
     model = YOLO(config.model_name)
 
-    # Optional: save training params
+    # save training params
     params_dict = {
         "lr0": config.lr0,
         "weight_decay": config.weight_decay,
@@ -23,7 +23,6 @@ def main():
     }
     save_params(params_dict, config.dataset_name)
 
-    # Train
     model.train(
         data=str(config.data_yaml),
         epochs=config.num_epochs,
@@ -36,7 +35,7 @@ def main():
         cls=params_dict["cls"]
     )
 
-    # Move YOLO runs folder to project root
+    # move YOLO runs folder to project root
     src_folder = os.path.join("runs/detect", f"yolo_train_{config.dataset_name}")
     dst_folder = os.path.join(config.runs_dir, f"yolo_train_{config.dataset_name}")
     if os.path.exists(dst_folder):
