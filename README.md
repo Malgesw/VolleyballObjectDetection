@@ -2,7 +2,7 @@
 
 ## 1. Description
 
-This repository contains the code for the project of the Polytechnic Uniersity of Turin course *Image Processing and Computer Vision*; the project consists in the developement of object detection models (YOLO-based) to detect player, court lines and the ball in a volleyball amateur match video stream. The pipeline supports:
+This repository contains the code for the project of the Polytechnic Uniersity of Turin course *Image Processing and Computer Vision*; the project consists in the developement of object detection models (YOLO-based) to detect players, court lines and the ball in a volleyball amateur match video stream. The pipeline supports:
 - robustness to lighting and color variations
 - automatic zoom on the ball during actions
 
@@ -21,7 +21,7 @@ More details in the [project report](./ImageProcessingAndCV_report.pdf).
 ## 3. Dependencies
 
 - Python 3.10+
-- Install with conda (recommended for `torch`):
+- Install with conda (recommended for `torch`/`torchvision` to ensure compatibility with CUDA):
 
 ```bash
 conda create -n volley python=3.10 -y
@@ -35,8 +35,6 @@ conda install pytorch torchvision -c pytorch -y
 ```bash
 pip install -r requirements.txt
 ```
-
-The `requirements.txt` lists the project-level packages; `torch`/`torchvision` are included there for convenience but installing via conda is recommended to ensure compatibility with CUDA.
 
 ## 4. How to visualize results
 
